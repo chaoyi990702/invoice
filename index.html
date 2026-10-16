@@ -25,6 +25,11 @@ input{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--line);bord
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .item{display:grid;grid-template-columns:60px 1fr 112px 26px;gap:6px;margin-bottom:6px;align-items:center}
 .item button{border:0;background:none;color:var(--muted);font-size:20px}
+.item{margin-bottom:12px}
+.qk{grid-column:1/4;display:flex;gap:5px;align-items:center;font-size:12px;color:var(--muted)}
+.qk input{padding:6px 7px;font-size:14px}
+.qk .kp,.qk .kh{width:58px;flex:none}
+.qk .kt{flex:1;min-width:0}
 .btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
 .btn{padding:11px 16px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
@@ -66,7 +71,8 @@ input{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--line);bord
  html,body{height:auto}
 }
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -84,6 +90,7 @@ input{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--line);bord
    <div><label>Tax %</label><input id="taxp" type="number" inputmode="decimal" value="0"></div>
   </div>
   <label>项目 (Qty / Particular / Unit price)</label>
+  <datalist id="types"><option value="general cleaning"><option value="deep cleaning"><option value="post renovation cleaning"><option value="move in cleaning"><option value="move out cleaning"></datalist>
   <div id="items"></div>
   <div class="btns">
    <button class="btn" id="add" type="button">+ 添加项目</button>
@@ -93,7 +100,7 @@ input{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--line);bord
    <button class="btn" id="print" type="button">打印</button>
    <button class="btn" id="clear" type="button">清空</button>
   </div>
-  <div class="hint">点"生成 PDF"会直接生成一个干净的 PDF（没有网址和日期水印），然后在弹出的菜单里选"存储到文件"或直接发给客户。INV No 会记住上次的号码并自动 +1。</div>
+  <div class="hint">每个项目下面有快速填写：输入人数和小时，Particular 会自动变成 "3 person x 8 hours general cleaning"，也可以直接手动修改。点"生成 PDF"会直接生成干净的 PDF（没有网址和日期水印），然后在弹出的菜单里选"存储到文件"或发给客户。INV No 会记住上次的号码并自动 +1。</div>
  </div>
 
  <div class="scroller"><div id="paper"><div class="sheet">
@@ -138,8 +145,20 @@ function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp
 function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}}
 function addItem(q,p,u){
  var d=document.createElement('div');d.className='item';
- d.innerHTML='<input class="iq" type="number" inputmode="decimal" placeholder="Qty" value="'+(q||'')+'"><input class="ip" placeholder="Particular" value="'+esc(p||'')+'"><input class="iu" type="number" inputmode="decimal" placeholder="Unit price" value="'+(u||'')+'"><button type="button" aria-label="delete">×</button>';
+ d.innerHTML='<input class="iq" type="number" inputmode="decimal" placeholder="Qty" value="'+(q||'')+'"><input class="ip" placeholder="Particular" value="'+esc(p||'')+'"><input class="iu" type="number" inputmode="decimal" placeholder="Unit price" value="'+(u||'')+'"><button type="button" aria-label="delete">×</button>'
+  +'<div class="qk"><input class="kp" type="number" inputmode="numeric" placeholder="人数"><span>person ×</span><input class="kh" type="number" inputmode="decimal" placeholder="小时"><span>hours</span><input class="kt" list="types" placeholder="服务类型" value="'+esc(store('lastType')||'general cleaning')+'"></div>';
  d.querySelector('button').onclick=function(){d.remove();render()};
+ var ip=d.querySelector('.ip'),iq=d.querySelector('.iq'),kp=d.querySelector('.kp'),kh=d.querySelector('.kh'),kt=d.querySelector('.kt');
+ function quick(){
+  var n=kp.value.trim(),h=kh.value.trim(),t=kt.value.trim();
+  if(!n&&!h)return;
+  var s=(n?n+' person':'')+(n&&h?' x ':'')+(h?h+' hours':'')+(t?' '+t:'');
+  ip.value=s;
+  if(!iq.value)iq.value='1';
+  if(t)store('lastType',t);
+  render();
+ }
+ d.querySelector('.qk').addEventListener('input',quick);
  d.addEventListener('input',render);
  $('items').appendChild(d);
 }
@@ -194,32 +213,35 @@ $('pdf').onclick=function(){
  var inv=$('inv').value||'invoice',cust=$('cust').value||'';
  store('lastInv',$('inv').value);
  var btn=$('pdf'),label=btn.textContent;
- if(typeof html2pdf==='undefined'){alert('PDF 组件没有加载成功，请检查网络后重试，或改用"打印"。');return}
+ if(typeof html2canvas==='undefined'||!window.jspdf){alert('PDF 组件没有加载成功，请检查网络后重试，或改用"打印"。');return}
  btn.disabled=true;btn.textContent='生成中...';
- var box=document.createElement('div');
- box.style.cssText='position:fixed;left:-10000px;top:0;width:794px;';
- var c=$('paper').cloneNode(true);
- c.removeAttribute('id');
- c.style.cssText='background:#fff;color:#000;width:794px;height:1122px;margin:0;padding:40px 47px;border:0;transform:none;overflow:hidden;font-family:"Arial Narrow",Arial,"Helvetica Neue",sans-serif;box-sizing:border-box;';
- box.appendChild(c);document.body.appendChild(box);
+ window.scrollTo(0,0);
  var name=('Invoice '+inv+(cust?' '+cust:'')).replace(/[\\/:*?"<>|]/g,'-')+'.pdf';
- html2pdf().set({margin:0,filename:name,image:{type:'jpeg',quality:0.98},
-  html2canvas:{scale:2,useCORS:true,scrollX:0,scrollY:0,windowWidth:794,backgroundColor:'#ffffff'},
-  jsPDF:{unit:'px',format:[794,1123],orientation:'portrait',hotfixes:['px_scaling']},
-  pagebreak:{mode:['avoid-all']}
- }).from(c).outputPdf('blob').then(function(blob){
-  document.body.removeChild(box);
-  var file=new File([blob],name,{type:'application/pdf'});
-  if(navigator.canShare&&navigator.canShare({files:[file]})){
-   return navigator.share({files:[file]}).catch(function(){});
-  }
-  var u=URL.createObjectURL(blob),a=document.createElement('a');
-  a.href=u;a.download=name;document.body.appendChild(a);a.click();
-  setTimeout(function(){URL.revokeObjectURL(u);a.remove()},4000);
- }).catch(function(e){
-  if(box.parentNode)document.body.removeChild(box);
-  alert('生成失败，请改用"打印"。');
- }).then(function(){btn.disabled=false;btn.textContent=label});
+ setTimeout(function(){
+  html2canvas($('paper'),{scale:2,backgroundColor:'#ffffff',useCORS:true,scrollX:0,scrollY:0,windowWidth:900,
+   onclone:function(doc){
+    var pp=doc.getElementById('paper'),sc=pp.parentNode;
+    sc.style.cssText='height:auto;overflow:visible;position:static;';
+    pp.style.cssText+=';transform:none;margin:0;border:0;';
+    var w=doc.querySelector('.wrap');if(w){w.style.padding='0';w.style.maxWidth='none'}
+    var np=doc.querySelector('.noprint');if(np)np.style.display='none';
+    doc.documentElement.style.padding='0';doc.body.style.background='#fff';
+   }
+  }).then(function(canvas){
+   var pdf=new window.jspdf.jsPDF({unit:'mm',format:'a4',orientation:'portrait'});
+   pdf.addImage(canvas.toDataURL('image/jpeg',0.95),'JPEG',0,0,210,297);
+   var blob=pdf.output('blob');
+   var file=new File([blob],name,{type:'application/pdf'});
+   if(navigator.canShare&&navigator.canShare({files:[file]})){
+    return navigator.share({files:[file]}).catch(function(){});
+   }
+   var u=URL.createObjectURL(blob),a=document.createElement('a');
+   a.href=u;a.download=name;document.body.appendChild(a);a.click();
+   setTimeout(function(){URL.revokeObjectURL(u);a.remove()},4000);
+  }).catch(function(e){
+   alert('生成失败，请改用"打印"。');
+  }).then(function(){btn.disabled=false;btn.textContent=label});
+ },60);
 };
 $('print').onclick=function(){
  render();
