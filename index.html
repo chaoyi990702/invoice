@@ -30,7 +30,7 @@ input{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--line);bord
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
 .hint{font-size:12px;color:var(--muted);margin-top:8px}
 /* invoice paper */
-.scroller{overflow-x:auto}
+.scroller{overflow:hidden;position:relative}
 #paper{background:#fff;color:#000;width:794px;min-height:1000px;padding:40px 46px;margin:0 auto;font-size:13px;line-height:1.45;border:1px solid var(--line)}
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
 .co h1{font-size:22px;margin:0;color:#333}
@@ -59,10 +59,13 @@ table.tot td:last-child{text-align:right;width:105px}
  body{background:#fff}
  .wrap{padding:0;max-width:none}
  .noprint{display:none!important}
- .scroller{overflow:visible}
- #paper{border:0;width:210mm;min-height:297mm;margin:0}
+ .scroller{overflow:visible;height:auto!important}
+ #paper{transform:none!important}
+ #paper{border:0;width:210mm;height:296mm;min-height:0;margin:0;overflow:hidden;page-break-after:avoid;break-after:avoid}
+ html,body{height:auto}
 }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -85,10 +88,11 @@ table.tot td:last-child{text-align:right;width:105px}
    <button class="btn" id="add" type="button">+ 添加项目</button>
   </div>
   <div class="btns">
-   <button class="btn primary" id="print" type="button">生成 PDF / 打印</button>
+   <button class="btn primary" id="pdf" type="button">生成 PDF</button>
+   <button class="btn" id="print" type="button">打印</button>
    <button class="btn" id="clear" type="button">清空</button>
   </div>
-  <div class="hint">iPhone：点"生成 PDF"后，若没有弹出打印，请用 Safari 的分享按钮 → 打印 → 两指放大预览 → 存储到"文件"。INV No 会记住上次的号码并自动 +1。</div>
+  <div class="hint">点"生成 PDF"会直接生成一个干净的 PDF（没有网址和日期水印），然后在弹出的菜单里选"存储到文件"或直接发给客户。INV No 会记住上次的号码并自动 +1。</div>
  </div>
 
  <div class="scroller"><div id="paper">
@@ -162,6 +166,7 @@ function render(){
  $('pSub').textContent=fmt(sub);
  $('pTax').textContent=fmt(tax);
  $('pTotal').innerHTML='<b>'+fmt(sub+tax)+'</b>';
+ fitPaper();
 }
 function nextInv(){
  var last=store('lastInv');if(!last)return '';
@@ -178,12 +183,56 @@ function reset(){
 ['cust','a1','a2','inv','date','term','taxp'].forEach(function(i){$(i).addEventListener('input',render)});
 $('add').onclick=function(){addItem()};
 $('clear').onclick=reset;
+
+$('pdf').onclick=function(){
+ render();
+ var inv=$('inv').value||'invoice',cust=$('cust').value||'';
+ store('lastInv',$('inv').value);
+ var btn=$('pdf'),label=btn.textContent;
+ if(typeof html2pdf==='undefined'){alert('PDF 组件没有加载成功，请检查网络后重试，或改用"打印"。');return}
+ btn.disabled=true;btn.textContent='生成中...';
+ var box=document.createElement('div');
+ box.style.cssText='position:fixed;left:-10000px;top:0;width:794px;';
+ var c=$('paper').cloneNode(true);
+ c.removeAttribute('id');
+ c.style.cssText='background:#fff;color:#000;width:794px;height:1122px;min-height:0;margin:0;padding:40px 46px;border:0;transform:none;overflow:hidden;font-size:13px;line-height:1.45;';
+ box.appendChild(c);document.body.appendChild(box);
+ var name=('Invoice '+inv+(cust?' '+cust:'')).replace(/[\\/:*?"<>|]/g,'-')+'.pdf';
+ html2pdf().set({margin:0,filename:name,image:{type:'jpeg',quality:0.98},
+  html2canvas:{scale:2,useCORS:true,scrollX:0,scrollY:0,windowWidth:794,backgroundColor:'#ffffff'},
+  jsPDF:{unit:'px',format:[794,1123],orientation:'portrait',hotfixes:['px_scaling']},
+  pagebreak:{mode:['avoid-all']}
+ }).from(c).outputPdf('blob').then(function(blob){
+  document.body.removeChild(box);
+  var file=new File([blob],name,{type:'application/pdf'});
+  if(navigator.canShare&&navigator.canShare({files:[file]})){
+   return navigator.share({files:[file],title:name}).catch(function(){});
+  }
+  var u=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=u;a.download=name;document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(u);a.remove()},4000);
+ }).catch(function(e){
+  if(box.parentNode)document.body.removeChild(box);
+  alert('生成失败，请改用"打印"。');
+ }).then(function(){btn.disabled=false;btn.textContent=label});
+};
 $('print').onclick=function(){
  render();
  if($('inv').value)store('lastInv',$('inv').value);
  var old=document.title;document.title='Invoice '+($('inv').value||'')+' '+($('cust').value||'');
  window.print();document.title=old;
 };
+
+function fitPaper(){
+ var sc=document.querySelector('.scroller'),pp=$('paper');
+ pp.style.transform='none';sc.style.height='auto';
+ var w=sc.clientWidth,s=Math.min(1,w/794);
+ if(s<1){pp.style.transformOrigin='top left';pp.style.transform='scale('+s+')';sc.style.height=(pp.offsetHeight*s)+'px';pp.style.margin='0'}
+ else{pp.style.margin='0 auto'}
+}
+window.addEventListener('resize',fitPaper);
+window.addEventListener('beforeprint',function(){var pp=$('paper');pp.style.transform='none';pp.style.margin='0';document.querySelector('.scroller').style.height='auto'});
+window.addEventListener('afterprint',fitPaper);
 reset();
 </script>
 </body>
